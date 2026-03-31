@@ -1,0 +1,7 @@
+$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
+name: media-env
+version: "7"
+image: mcr.microsoft.com/azureml/openmpi4.1.0-cuda11.8-cudnn8-ubuntu22.04
+conda_file: conda_dependencies.yaml
+description: >
+  Deep learning environment for medical image analysis.

@@ -1,0 +1,20 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+
+experiment_name: myocardium_segmentation_job
+display_name: Fake Job Placeholder
+
+command: >
+  python test_job.py 
+  --fold ${{inputs.fold}}
+
+inputs:
+  fold: 0
+
+code: ./
+# Make sure these match your actual Azure ML environment and compute cluster names
+environment: azureml:media-env:2
+compute: azureml:clusterprdwe-gpu-vzhst6
+
+resources:
+  instance_count: 2

@@ -1,0 +1,7 @@
+$schema: https://azuremlschemas.azureedge.net/latest/data.schema.json
+type: uri_folder
+name: LEMS-CT-NIfTI
+version: "1"
+description: >
+  Folder containing NIFTI CT scans for LEMS-CT.
+path: azureml://datastores/73da10b45dff54e2db0d3a1fab882485/paths/NIFTI/

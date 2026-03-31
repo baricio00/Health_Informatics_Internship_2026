@@ -1,0 +1,62 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: Myocardium SegResNet Training
+description: >
+  Trains a Dual-GPU MONAI SegResNet on the LEMS-CT-NIfTI dataset.
+  Includes Automatic Mixed Precision (AMP) and PersistentDataset caching.
+experiment_name: myocardium_segmentation_job
+compute: azureml:clusterprdwe-gpu-vzhst6
+
+environment: azureml:media-env:7
+
+environment_variables:
+  PYTHONPATH: .
+
+inputs:
+  input_data:
+    type: uri_folder
+    path: azureml:LEMS-CT-NIfTI:1
+    mode: ro_mount
+  fold: 0
+
+  # -----------------------------------------------------------------
+  # TO FINETUNE OR RESUME: Uncomment the block below and replace 
+  # the 'path' with the actual datastore URI to your .pth file.
+  # -----------------------------------------------------------------
+  # checkpoint_file:
+  #   type: uri_file
+  #   path: azureml://datastores/73da10b45dff54e2db0d3a1fab882485/paths/output/models/latest_checkpoint.pth
+  #   mode: ro_mount
+
+  
+  # -----------------------------------------------------------------
+  # TO FINETUNE: Uncomment the line below to load the model weights. 
+  # Add this additional input argument to the command: > below
+  # -----------------------------------------------------------------
+  # --checkpoint ${{inputs.checkpoint_file}}
+  
+  # -----------------------------------------------------------------
+  # TO RESUME: Uncomment BOTH the checkpoint line above AND the line below
+  # Add these additional input arguments (both --checkpoint and --resume) to the command: > below
+  # -----------------------------------------------------------------
+  # --resume
+
+outputs:
+  output_model:
+    type: uri_folder
+
+code: ../
+command: >
+  python scripts/train_job_only_dice.py
+  --input_data ${{inputs.input_data}}
+  --output_model ${{outputs.output_model}}
+  --split_csv data/cv_splits.csv
+  --fold ${{inputs.fold}}
+  --config config/train_config.yaml
+
+resources:
+    instance_count: 2
+
+distribution:
+  type: pytorch
+  process_count_per_instance: 1

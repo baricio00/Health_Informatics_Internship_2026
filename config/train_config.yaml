@@ -1,0 +1,38 @@
+# LEMS-CT-project/config/train_config.yaml
+
+model:
+  spatial_dims: 3
+  in_channels: 1
+  out_channels: 2
+  init_filters: 16
+  blocks_down: [1, 2, 2, 4]
+  blocks_up: [1, 1, 1]
+  
+transforms:
+  target_spacing: [1.0, 1.0, 1.0]
+  roi_size: [96, 96, 96]
+  a_min: -100.0
+  a_max: 400.0
+  b_min: 0.0
+  b_max: 1.0
+  flip_prob: 0.10
+  rotate_prob: 0.10
+
+training:
+  lr: 0.0001
+  weight_decay: 0.01
+  max_iterations: 5000
+  eval_num: 250
+  accumulation_steps: 2
+  use_ema: true
+  ema_alpha: 0.999
+  warmup_steps: 500
+
+
+inference:
+  overlap: 0.5
+  mode: "constant"
+  sw_batch_size: 4
+
+misc:
+  seed: 1303
