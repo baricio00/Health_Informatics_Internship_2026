@@ -26,7 +26,8 @@ from lems_ct.src.utils.data import get_files_from_csv
 from lems_ct.src.utils.misc import (
     update_ema_variables,
     exp_lr_scheduler_with_warmup,
-    concat_all_gather
+    concat_all_gather,
+    train_collate_fn
 )
 from lems_ct.src.metrics.utils import calculate_dice_split
 
@@ -398,7 +399,7 @@ def main(args, cfg):
 
     # We use local_rank in the cache directory name so each GPU on the machine gets its own cache folder. 
     # This prevents multiple processes on the same machine from trying to read/write the exact same cache files simultaneously.
-    cache_dir = Path(f"./monai_cache_rank_{local_rank}_fold_{args.fold}")
+    cache_dir = Path(f"/tmp/monai_cache_rank_{local_rank}_fold_{args.fold}")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # PersistentDataset dramatically speeds up training by executing the deterministic 
@@ -417,19 +418,20 @@ def main(args, cfg):
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=1, # Often 1 for 3D volumes due to memory constraints
+        batch_size=cfg.training.train_batch_size, # Often 1 for 3D volumes due to memory constraints
         shuffle=False, # Shuffle is handled by the sampler
-        num_workers=2,
+        num_workers=cfg.training.train_num_workers,
         pin_memory=True, # Speeds up host-to-device (CPU to GPU) transfers
         sampler=train_sampler,
+        collate_fn=train_collate_fn
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=1,
+        batch_size=cfg.training.val_batch_size,
         shuffle=False,
-        num_workers=2,
+        num_workers=cfg.training.val_num_workers,
         pin_memory=True,
-        sampler=val_sampler,
+        sampler=val_sampler
     )
 
     # 2. Main Model
@@ -457,7 +459,7 @@ def main(args, cfg):
             print("EMA Model initialized for evaluation.", flush=True)
 
     # DiceFocalLoss combines the overlap-based optimization of Dice with 
-    # the class-imbalance handling of Focal Loss. Standard in medical segmentation.
+    # the class-imbalance handling of Focal Loss.
     loss_function = DiceFocalLoss(
         include_background=False,
         to_onehot_y=True,

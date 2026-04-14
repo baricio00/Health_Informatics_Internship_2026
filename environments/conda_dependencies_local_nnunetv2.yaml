@@ -6,7 +6,6 @@ channels:
 dependencies:
   - python=3.10
   - pip==24.0
-  # < 2.9
   - pytorch
   - torchvision
   - torchaudio
@@ -36,7 +35,3 @@ dependencies:
       - scikit-image
       - matplotlib
       - nnunetv2
-      - tqdm
-      - psutil
-      - nvidia-ml-py
-      - omegaconf
