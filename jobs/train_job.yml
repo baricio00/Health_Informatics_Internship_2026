@@ -47,7 +47,7 @@ outputs:
 
 code: ../
 command: >
-  python scripts/train_job_only_dice.py
+  python scripts/train_job.py
   --input_data ${{inputs.input_data}}
   --output_model ${{outputs.output_model}}
   --split_csv data/cv_splits.csv
