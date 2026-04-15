@@ -5,7 +5,7 @@ description: >
   Trains a Dual-GPU MONAI SegResNet on the LEMS-CT-NIfTI dataset.
   Includes Automatic Mixed Precision (AMP) and PersistentDataset caching.
 experiment_name: myocardium_segmentation_job
-compute: azureml:clusterprdwe-gpu-vzhst6
+compute: azureml:clusterprdwe-g-t2-vzhst6
 
 environment: azureml:media-env:7
 
