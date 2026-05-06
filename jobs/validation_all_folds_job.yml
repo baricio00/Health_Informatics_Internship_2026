@@ -1,0 +1,69 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: Myocardium Full CV Validation
+description: >
+  Performs sequential inference across all 5 folds of the LEMS-CT-NIfTI dataset.
+  Loads weights from 5 specific training jobs, saves predicted masks, and 
+  generates a consolidated Dice report.
+experiment_name: myocardium_val_full_cv
+compute: azureml:clusterprdwe-gpu-vzhst6
+
+environment: azureml:media-env:7
+
+environment_variables:
+  PYTHONPATH: .
+
+inputs:
+  input_data:
+    type: uri_folder
+    path: azureml:LEMS-CT-NIfTI:1
+    mode: ro_mount
+  
+  split_csv:
+    type: uri_file
+    path: azureml://datastores/73da10b45dff54e2db0d3a1fab882485/paths/data/cv_splits.csv
+
+  # -----------------------------------------------------------------
+  # Model Weights for each Fold (Mounted from previous successful jobs)
+  # -----------------------------------------------------------------
+  w0:
+    type: uri_folder
+    path: azureml:azureml_amusing_glass_6wtpqqn5t1_output_data_output_model:1
+    mode: ro_mount
+  w1:
+    type: uri_folder
+    path: azureml:azureml_magenta_stomach_rp773hscbs_output_data_output_model:1
+    mode: ro_mount
+  w2:
+    type: uri_folder
+    path: azureml:azureml_polite_shampoo_drv30v29hs_output_data_output_model:1
+    mode: ro_mount
+  w3:
+    type: uri_folder
+    path: azureml:azureml_olden_cat_bskn3cdb3g_output_data_output_model:1
+    mode: ro_mount
+  w4:
+    type: uri_folder
+    path: azureml:azureml_ashy_rail_snvq74fr39_output_data_output_model:1
+    mode: ro_mount
+
+outputs:
+  validation_results:
+    type: uri_folder
+
+code: ../
+
+command: >
+  python scripts/validation_all_folds.py 
+  --input_data ${{inputs.input_data}} 
+  --split_csv ${{inputs.split_csv}} 
+  --config config/train_config.yaml 
+  --output_dir ${{outputs.validation_results}} 
+  --w0 ${{inputs.w0}} 
+  --w1 ${{inputs.w1}} 
+  --w2 ${{inputs.w2}} 
+  --w3 ${{inputs.w3}} 
+  --w4 ${{inputs.w4}}
+
+resources:
+  instance_count: 1

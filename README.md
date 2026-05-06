@@ -112,3 +112,28 @@ bash scripts/submit_train_folds.sh
 | **ASD** | Average surface distance in mm (lower is better) |
 
 Metrics are logged per fold to MLflow (e.g. `fold_0_val_dice`, `fold_0_val_hd95`, `fold_0_val_ASD`).
+
+
+{"fold_0": "gifted_leek_gsn13rz9y0",
+
+"fold_1": "magenta_stomach_rp773hscbs",
+
+"fold_2": "polite_shampoo_drv30v29hs",
+
+"fold_3": "olden_cat_bskn3cdb3g",
+
+"fold_4": "ashy_rail_snvq74fr39"
+
+}
+
+- create Dockerfile from a conda environment (e.g., conda_dependencies_local.yaml)
+- build dockerfile into image; execute the following command from the project root: 
+docker build -t media-env:latest ./environments/ 
+- tag local image before pushing to the dockerhub: docker tag media-env:latest francescopisu/media-env:latest
+- push it to the dockerhub: docker push francescopisu/media-env:latest
+- 
+
+docker run --rm -it --privileged \
+  -v "$PWD/sif_out:/out" \
+  kaczmarj/apptainer:latest \
+  build /out/mediaenv.sif docker://francescopisu/media-env:latest

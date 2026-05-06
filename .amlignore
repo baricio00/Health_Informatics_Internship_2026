@@ -1,0 +1,18 @@
+# Ignore the external drive and anything related to it
+outputs/
+*.pth
+*.nii.gz
+
+# Ignore the conda environment if it's somehow being indexed
+azure/
+venv/
+.venv/
+
+# Standard ignores
+.git/
+.vscode/
+__pycache__/
+
+/sif_out
+/notebooks/cv_inference_results/
+/notebooks/output/

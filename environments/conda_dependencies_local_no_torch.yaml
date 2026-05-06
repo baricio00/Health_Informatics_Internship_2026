@@ -1,0 +1,31 @@
+name: azure-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip==24.0
+  - pip:
+      - "setuptools<70.0.0"
+      # Azure SDKs for local notebook data access
+      - azure-ai-ml
+      - azure-identity
+      - azureml-fsspec
+      - azureml-core
+      # Explicit conflict resolution
+      - azure-storage-blob==12.19.0
+      # Tracking
+      # Medical Imaging & Deep Learning
+      - monai
+      - nibabel
+      - itk
+      - SimpleITK
+      # Data Science stack
+      - numpy
+      - pandas
+      - scipy
+      - scikit-image
+      - matplotlib
+      - tqdm
+      - psutil
+      - omegaconf
+      - ipykernel
