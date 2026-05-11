@@ -6,7 +6,7 @@ description: >
   Loads weights from 5 specific training jobs, saves predicted masks, and 
   generates a consolidated Dice report.
 experiment_name: myocardium_val_full_cv
-compute: azureml:clusterprdwe-gpu-vzhst6
+compute: azureml:vmprdwe8-g-t2-vzhst6
 
 environment: azureml:media-env:7
 

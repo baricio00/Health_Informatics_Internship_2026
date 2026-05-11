@@ -5,7 +5,7 @@ description: >
   Trains a Dual-GPU MONAI SegResNet on the LEMS-CT-NIfTI dataset.
   Includes Automatic Mixed Precision (AMP) and PersistentDataset caching.
 experiment_name: myocardium_segmentation_job
-compute: azureml:clusterprdwe-gpu-vzhst6
+compute: azureml:vmprdwe8-g-t2-vzhst6
 
 environment: azureml:media-env:7
 
@@ -55,8 +55,4 @@ command: >
   --config config/train_config.yaml
 
 resources:
-    instance_count: 2
-
-distribution:
-  type: pytorch
-  process_count_per_instance: 1
+    instance_count: 1

@@ -5,6 +5,13 @@ __pycache__/
 
 /notebooks/cv_inference_results
 /notebooks/output
+/notebooks/outputs
+/outputs
+/sweep_outputs
+data/skipped_invalid_files_fold_*.csv
+mlruns/
+/.claude/
+LEGGIMI.md
 *.sif
 *.nii.gz
 *.pth
