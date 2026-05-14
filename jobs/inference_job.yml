@@ -1,0 +1,47 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+
+display_name: Myocardium Ensemble Inference
+experiment_name: myocardium_segmentation_inference
+description: >
+  Runs MONAI sliding-window ensemble inference over the five fold checkpoints
+  and writes the predicted mask as a NIfTI file.
+
+compute: azureml:clusterprdwe-gpu-vzhst6
+environment: azureml:media-env:7
+
+environment_variables:
+  PYTHONPATH: .
+
+code: ../
+
+inputs:
+  input_data:
+    type: uri_folder
+    path: azureml:LEMS-CT-NIfTI:1
+    mode: ro_mount
+  checkpoints_root:
+    type: uri_folder
+    path: ../outputs-only-dice-1
+    mode: ro_mount
+  fold_count: 5
+  case_name: ""
+  seed: 1303
+  unseen_offset: 200
+
+outputs:
+  output_dir:
+    type: uri_folder
+
+command: >
+  python jobs/inference_job.py
+  --input_data ${{inputs.input_data}}
+  --checkpoints_root ${{inputs.checkpoints_root}}
+  --output_dir ${{outputs.output_dir}}
+  --fold_count ${{inputs.fold_count}}
+  --case_name ${{inputs.case_name}}
+  --seed ${{inputs.seed}}
+  --unseen_offset ${{inputs.unseen_offset}}
+
+resources:
+  instance_count: 1

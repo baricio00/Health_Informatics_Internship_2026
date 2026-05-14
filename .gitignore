@@ -19,6 +19,8 @@ LEGGIMI.md
 # C extensions
 *.so
 
+outputs-only-dice-1/
+
 # Distribution / packaging
 .Python
 build/
