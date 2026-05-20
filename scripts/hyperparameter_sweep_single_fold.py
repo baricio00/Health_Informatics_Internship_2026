@@ -19,13 +19,13 @@ from lems_ct.src.utils.data import resolve_local_path
 
 
 DEFAULT_LRS = ["3e-5", "1e-4", "3e-4"]
-DEFAULT_WEIGHT_DECAYS = ["1e-5", "1e-4", "1e-3", "1e-2"]
+DEFAULT_WEIGHT_DECAYS = ["1e-5", "1e-4", "1e-3"]
 DEFAULT_ROI_SIZES = ["96"]
-DEFAULT_LOSSES = ["dice", "dice_focal", "hausdorff", "tversky"]
+DEFAULT_LOSSES = ["dice", "dice_focal", "tversky"]
 DEFAULT_TARGET_SPACINGS = ["1.0"]
 OOM_SAFE_CUDA_ALLOC_CONF = "expandable_segments:True"
-DEFAULT_AZURE_COMPUTE = "azureml:vmprdwe8-g-t2-vzhst6"
-DEFAULT_AZURE_ENVIRONMENT = "azureml:media-env:7"
+DEFAULT_AZURE_COMPUTE = "azureml:clusterprdwe-vzhst6"
+DEFAULT_AZURE_ENVIRONMENT = "azureml:media-env:8"
 DEFAULT_AZURE_INPUT_DATA = "azureml:LEMS-CT-NIfTI:1"
 DEFAULT_AZURE_TENANT_ID = "ebbb4fc3-587b-477c-a1e8-ee47d8c02546"
 DEFAULT_AZURE_SUBSCRIPTION_ID = "ab211f7b-463f-4833-9605-d260e596a35a"
@@ -158,6 +158,14 @@ def write_results(path, rows):
     write_csv(path, ranked_rows)
 
 
+def azure_display_name(job):
+    return (
+        "Myocardium HP Sweep "
+        f"fold={job['fold']} loss={job['loss']} lr={job['base_lr']} "
+        f"wd={job['weight_decay']} roi={job['roi_size']}"
+    )
+
+
 def build_jobs(args, sweep_dir):
     lrs = parse_float_values(args.lrs)
     weight_decays = parse_float_values(args.weight_decays)
@@ -165,8 +173,8 @@ def build_jobs(args, sweep_dir):
     spacings = parse_spacings(args.target_spacings)
     max_iterations = int(args.max_iterations)
 
-    if max_iterations > 8000:
-        raise SystemExit("ERROR: --max_iterations must be <= 8000 for this sweep.")
+    if max_iterations > 10000:
+        raise SystemExit("ERROR: --max_iterations must be <= 10000 for this sweep.")
 
     jobs = []
     combinations = itertools.product(
@@ -182,6 +190,17 @@ def build_jobs(args, sweep_dir):
         run_id = run_id_for(args.fold, lr, weight_decay, roi_size, loss_name, spacing)
         run_root = sweep_dir / run_id
         resource_overrides = []
+        if roi_size >= args.large_roi_threshold and not args.disable_large_roi_memory_overrides:
+            resource_overrides.extend(
+                [
+                    f"training.train_batch_size={args.large_roi_train_batch_size}",
+                    f"training.accumulation_steps={args.large_roi_accumulation_steps}",
+                    f"inference.sw_batch_size={args.large_roi_sw_batch_size}",
+                ]
+            )
+            if args.large_roi_disable_ema:
+                resource_overrides.append("training.use_ema=false")
+
         if canonical_loss == "hausdorff" and not args.disable_hausdorff_memory_overrides:
             resource_overrides.extend(
                 [
@@ -196,7 +215,6 @@ def build_jobs(args, sweep_dir):
                 resource_overrides.append("training.use_ema=false")
 
         training_overrides = [
-            *args.extra_overrides,
             f"training.loss={loss_name}",
             f"training.lr={lr}",
             f"training.weight_decay={weight_decay}",
@@ -204,6 +222,7 @@ def build_jobs(args, sweep_dir):
             f"transforms.roi_size=[{roi_size},{roi_size},{roi_size}]",
             f"transforms.target_spacing=[{spacing[0]},{spacing[1]},{spacing[2]}]",
             *resource_overrides,
+            *args.extra_overrides,
         ]
         command = [
             args.python_executable,
@@ -293,7 +312,7 @@ def manifest_rows(jobs):
 
 
 def azure_job_yaml(job, args):
-    display_name = f"Myocardium HP Sweep {job['run_id']}"
+    display_name = azure_display_name(job)
     description = (
         "Single-fold SegResNet hyperparameter sweep run. "
         f"loss={job['loss']}, lr={job['base_lr']}, "
@@ -316,6 +335,15 @@ description: {yaml_scalar(description)}
 experiment_name: {yaml_scalar(args.azure_experiment_name)}
 compute: {args.azure_compute}
 environment: {args.azure_environment}
+
+tags:
+  run_id: {yaml_scalar(job["run_id"])}
+  fold: {yaml_scalar(job["fold"])}
+  loss: {yaml_scalar(job["loss"])}
+  base_lr: {yaml_scalar(job["base_lr"])}
+  weight_decay: {yaml_scalar(job["weight_decay"])}
+  roi_size: {yaml_scalar(job["roi_size"])}
+  target_spacing: {yaml_scalar(job["target_spacing"])}
 
 environment_variables:
   PYTHONPATH: "."
@@ -432,7 +460,46 @@ def azure_job_status(ml_client, job_name):
     return getattr(returned_job, "status", "")
 
 
-def submit_azure_sweep_sdk(jobs, args, sweep_dir):
+def submit_azure_sweep_sdk_queue(jobs, args, sweep_dir):
+    from azure.ai.ml import load_job
+
+    submissions_path = sweep_dir / "azure_submissions.csv"
+    rows = []
+    ml_client = get_azure_ml_client(args)
+
+    for job in jobs:
+        submitted_path = Path(job["run_root"]) / "azure_submission.json"
+        if args.skip_completed and submitted_path.exists():
+            print(f"Skipping submitted Azure job: {job['run_id']}", flush=True)
+            stdout = submitted_path.read_text()
+            rows.append(azure_submission_row(job, "skipped_submitted", 0, stdout, ""))
+            write_csv(submissions_path, rows)
+            continue
+
+        Path(job["run_root"]).mkdir(parents=True, exist_ok=True)
+        print(f"Queueing Azure job via SDK: {job['run_id']}", flush=True)
+        try:
+            azure_job = load_job(job["azure_job_file"])
+            returned_job = ml_client.jobs.create_or_update(azure_job)
+            payload = serialize_azure_job(returned_job)
+            stdout = json.dumps(payload)
+            submitted_path.write_text(stdout)
+            rows.append(azure_submission_row(job, "submitted", 0, stdout, ""))
+            print(f"submitted: {job['run_id']} ({payload['name']})", flush=True)
+        except Exception as exc:
+            stderr = f"{type(exc).__name__}: {exc}"
+            rows.append(azure_submission_row(job, "submission_failed", 1, "", stderr))
+            print(f"submission_failed: {job['run_id']} ({stderr})", flush=True)
+
+        write_csv(submissions_path, rows)
+
+        if args.azure_submit_interval_seconds > 0:
+            time.sleep(args.azure_submit_interval_seconds)
+
+    return submissions_path
+
+
+def submit_azure_sweep_sdk_watch(jobs, args, sweep_dir):
     from azure.ai.ml import load_job
 
     submissions_path = sweep_dir / "azure_submissions.csv"
@@ -524,15 +591,20 @@ def submit_azure_sweep_sdk(jobs, args, sweep_dir):
 def make_pipeline_command_component(job, args, has_previous):
     from azure.ai.ml import Input, Output, command
 
-    command_text = job["azure_command"]
+    compute_name = azure_compute_name(args.azure_compute)
+    write_marker_command = (
+        "mkdir -p ${{outputs.completion_marker}} && "
+        "printf done > ${{outputs.completion_marker}}/done.txt"
+    )
+    command_text = f"{job['azure_command']} && {write_marker_command}"
     inputs = {"input_data": Input(type="uri_folder")}
     if has_previous:
-        inputs["previous_output"] = Input(type="uri_folder")
-        command_text = f"test -d ${{{{inputs.previous_output}}}} && {command_text}"
+        inputs["previous_marker"] = Input(type="uri_folder")
+        command_text = f"test -f ${{{{inputs.previous_marker}}}}/done.txt && {command_text}"
 
     return command(
         name=safe_azure_name(f"sweep_train_{job['run_id']}"),
-        display_name=job["run_id"],
+        display_name=azure_display_name(job),
         description=(
             f"loss={job['loss']}, lr={job['base_lr']}, "
             f"weight_decay={job['weight_decay']}, roi={job['roi_size']}, "
@@ -541,8 +613,13 @@ def make_pipeline_command_component(job, args, has_previous):
         code=str(resolve_local_path(args.azure_code)),
         command=command_text,
         environment=args.azure_environment,
+        compute=compute_name,
         inputs=inputs,
-        outputs={"output_model": Output(type="uri_folder")},
+        outputs={
+            "output_model": Output(type="uri_folder"),
+            "completion_marker": Output(type="uri_folder"),
+        },
+        instance_count=args.azure_instance_count,
         is_deterministic=False,
     )
 
@@ -561,25 +638,25 @@ def build_sequential_azure_pipeline(jobs, args):
         default_compute=compute_name,
     )
     def sweep_pipeline(input_data):
-        previous_output = None
-        last_output = None
+        previous_marker = None
+        last_marker = None
 
         for idx, job in enumerate(jobs):
             train_component = make_pipeline_command_component(
                 job,
                 args,
-                has_previous=previous_output is not None,
+                has_previous=previous_marker is not None,
             )
-            if previous_output is None:
+            if previous_marker is None:
                 node = train_component(input_data=input_data)
             else:
                 node = train_component(
                     input_data=input_data,
-                    previous_output=previous_output,
+                    previous_marker=previous_marker,
                 )
 
             node.name = f"train_{idx:04d}"
-            node.display_name = job["run_id"]
+            node.display_name = azure_display_name(job)
             node.tags = {
                 "run_id": job["run_id"],
                 "fold": str(job["fold"]),
@@ -589,10 +666,10 @@ def build_sequential_azure_pipeline(jobs, args):
                 "roi_size": str(job["roi_size"]),
                 "target_spacing": str(job["target_spacing"]),
             }
-            previous_output = node.outputs.output_model
-            last_output = previous_output
+            previous_marker = node.outputs.completion_marker
+            last_marker = previous_marker
 
-        return {"last_output": last_output}
+        return {"queue_done": last_marker}
 
     return sweep_pipeline(
         input_data=Input(
@@ -790,15 +867,24 @@ def run_sweep(jobs, args, sweep_dir):
 
                 run_root = Path(job["run_root"])
                 run_root.mkdir(parents=True, exist_ok=True)
+                command = list(job["command"])
+                latest_checkpoint = Path(job["fold_output"]) / "latest_checkpoint.pth"
+                if args.resume_partial and latest_checkpoint.exists():
+                    command.extend(["--checkpoint", str(latest_checkpoint), "--resume"])
+                    print(
+                        f"Resuming partial run from checkpoint: {latest_checkpoint}",
+                        flush=True,
+                    )
+
                 with (run_root / "command.txt").open("w") as command_file:
-                    command_file.write(job["command_text"] + "\n")
+                    command_file.write(shlex.join(command) + "\n")
 
                 log_file = Path(job["log_path"]).open("w")
                 print(f"Launching {job['run_id']}", flush=True)
                 process_env = os.environ.copy()
                 process_env.setdefault("PYTORCH_CUDA_ALLOC_CONF", OOM_SAFE_CUDA_ALLOC_CONF)
                 process = subprocess.Popen(
-                    job["command"],
+                    command,
                     cwd=PROJECT_ROOT,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
@@ -862,7 +948,7 @@ def parse_args():
         help="Stop after this many consecutive failed jobs. Use 0 to disable.",
     )
     parser.add_argument("--poll_seconds", type=float, default=10.0)
-    parser.add_argument("--max_iterations", type=int, default=8000)
+    parser.add_argument("--max_iterations", type=int, default=10000)
     parser.add_argument("--lrs", nargs="+", default=DEFAULT_LRS)
     parser.add_argument("--weight_decays", nargs="+", default=DEFAULT_WEIGHT_DECAYS)
     parser.add_argument("--roi_sizes", nargs="+", default=DEFAULT_ROI_SIZES)
@@ -877,6 +963,21 @@ def parse_args():
         "--disable_hausdorff_memory_overrides",
         action="store_true",
         help="Do not apply smaller batch/accumulation defaults for Hausdorff trials.",
+    )
+    parser.add_argument(
+        "--disable_large_roi_memory_overrides",
+        action="store_true",
+        help="Do not apply smaller batch/EMA defaults for large ROI trials.",
+    )
+    parser.add_argument("--large_roi_threshold", type=int, default=96)
+    parser.add_argument("--large_roi_train_batch_size", type=int, default=1)
+    parser.add_argument("--large_roi_accumulation_steps", type=int, default=4)
+    parser.add_argument("--large_roi_sw_batch_size", type=int, default=1)
+    parser.add_argument(
+        "--large_roi_disable_ema",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Disable EMA for ROI >= --large_roi_threshold to reduce GPU memory.",
     )
     parser.add_argument("--hausdorff_train_batch_size", type=int, default=1)
     parser.add_argument("--hausdorff_accumulation_steps", type=int, default=4)
@@ -893,12 +994,22 @@ def parse_args():
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--skip_completed", action="store_true")
     parser.add_argument(
+        "--resume_partial",
+        action="store_true",
+        help=(
+            "For local sweeps, resume an incomplete run from fold_N/latest_checkpoint.pth "
+            "when present. Use together with --skip_completed after an interruption."
+        ),
+    )
+    parser.add_argument(
         "--azure_submitter",
-        choices=["pipeline", "sdk", "cli"],
+        choices=["pipeline", "sdk", "sdk_watch", "cli"],
         default="pipeline",
         help=(
-            "pipeline creates all child jobs up front with sequential dependencies; "
-            "sdk submits/waits from this process; cli requires the az ml extension."
+            "pipeline creates all child jobs up front with sequential marker dependencies; "
+            "sdk submits all command jobs immediately and lets Azure queue them; "
+            "sdk_watch submits/waits from this process with --max_parallel; "
+            "cli requires the az ml extension."
         ),
     )
     parser.add_argument(
@@ -958,7 +1069,12 @@ def main():
             if args.dry_run:
                 print("Dry run only. Azure YAML files generated, no jobs submitted.", flush=True)
                 return
-            submissions_path = submit_azure_sweep_sdk(jobs, args, sweep_dir)
+            submissions_path = submit_azure_sweep_sdk_queue(jobs, args, sweep_dir)
+        elif args.azure_submitter == "sdk_watch":
+            if args.dry_run:
+                print("Dry run only. Azure YAML files generated, no jobs submitted.", flush=True)
+                return
+            submissions_path = submit_azure_sweep_sdk_watch(jobs, args, sweep_dir)
         else:
             if args.dry_run:
                 print("Dry run only. Azure YAML files generated, no jobs submitted.", flush=True)

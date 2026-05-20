@@ -8,7 +8,7 @@ description: >
   and writes the predicted mask as a NIfTI file.
 
 compute: azureml:clusterprdwe-gpu-vzhst6
-environment: azureml:media-env:7
+environment: azureml:media-env:8
 
 environment_variables:
   PYTHONPATH: .

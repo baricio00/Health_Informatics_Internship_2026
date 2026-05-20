@@ -20,9 +20,11 @@ transforms:
 
 training:
   loss: "dice_focal"
-  lr: 0.0001
-  weight_decay: 0.01
-  max_iterations: 30000
+  #lr: 0.0001
+  lr: 0.0003
+  # weight_decay: 0.01
+  weight_decay: 0.00001
+  max_iterations: 6000
   eval_num: 500
   accumulation_steps: 2
   use_ema: true
@@ -32,6 +34,7 @@ training:
   train_num_workers: 2
   val_batch_size: 1
   val_num_workers: 2
+  max_validation_batches: 0
 
 
 inference:

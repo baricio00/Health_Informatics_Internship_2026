@@ -1,13 +1,13 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
-display_name: Myocardium SegResNet Training
+display_name: Myocardium UNETR Training
 description: >
-  Trains a Dual-GPU MONAI SegResNet on the LEMS-CT-NIfTI dataset.
+  Trains a MONAI UNETR on the LEMS-CT-NIfTI dataset.
   Includes Automatic Mixed Precision (AMP) and PersistentDataset caching.
 experiment_name: myocardium_segmentation_job
-compute: azureml:vmprdwe8-g-t2-vzhst6
+compute: azureml:clusterprdwe-vzhst6
 
-environment: azureml:media-env:7
+environment: azureml:media-env:8
 
 environment_variables:
   PYTHONPATH: .
@@ -47,7 +47,7 @@ outputs:
 
 code: ../
 command: >
-  python scripts/train_job.py
+  python scripts/UNETR.py
   --input_data ${{inputs.input_data}}
   --output_model ${{outputs.output_model}}
   --split_csv data/cv_splits.csv

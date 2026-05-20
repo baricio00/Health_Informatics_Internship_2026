@@ -116,7 +116,17 @@ def select_device(requested_device, distributed):
         if device.type == "cuda" and not torch.cuda.is_available():
             raise SystemExit("ERROR: CUDA was requested, but torch.cuda is not available.")
         if device.type == "mps" and not torch.backends.mps.is_available():
-            raise SystemExit("ERROR: MPS was requested, but torch.backends.mps is not available.")
+            details = (
+                f"python_arch={platform.machine()}, "
+                f"mps_built={torch.backends.mps.is_built()}, "
+                f"mps_available={torch.backends.mps.is_available()}"
+            )
+            if is_rosetta_or_intel_python():
+                details += ". Use a native arm64 Python environment, not an x86_64/Rosetta environment."
+            raise SystemExit(
+                "ERROR: MPS was requested, but torch.backends.mps is not available "
+                f"({details})."
+            )
         if device.type == "cuda":
             torch.cuda.set_device(device)
         return device
@@ -230,9 +240,18 @@ class DownsampledHausdorffDTLoss(nn.Module):
             hausdorff_target = target_tensor
 
         hausdorff_input = hausdorff_input.float()
+        hausdorff_device = hausdorff_input.device
+        if hausdorff_device.type == "mps":
+            # MONAI's distance transform creates float64 tensors, which MPS does not support.
+            # Keep the model on MPS, but compute the distance-transform part on CPU.
+            hausdorff_input = hausdorff_input.cpu()
+            hausdorff_target = hausdorff_target.cpu()
+
         loss = self.lambda_hausdorff * self.hausdorff(
             hausdorff_input, hausdorff_target
         )
+        if hausdorff_device.type == "mps":
+            loss = loss.to(hausdorff_device)
         if self.dice is not None:
             loss = loss + self.lambda_dice * self.dice(input_tensor, target_tensor)
         return loss
@@ -470,10 +489,21 @@ def validation_ddp(
         print("\nEvaluating...", flush=True)
 
     # Disable gradient calculation for validation to save memory and compute
+    max_validation_batches = int(cfg.training.get("max_validation_batches", 0) or 0)
+    if max_validation_batches < 0:
+        raise ValueError("training.max_validation_batches must be >= 0")
+    validation_batches = (
+        min(len(val_loader), max_validation_batches)
+        if max_validation_batches
+        else len(val_loader)
+    )
+
     with torch.no_grad():
         for step, val_batch in enumerate(val_loader, start=1):
+            if max_validation_batches and step > max_validation_batches:
+                break
             if global_rank == 0:
-                print(f"\nValidating volume {step}/{len(val_loader)}...", flush=True)
+                print(f"\nValidating volume {step}/{validation_batches}...", flush=True)
 
             # Synchronize CUDA before measuring time to ensure accurate benchmarking
             synchronize_device(device)
@@ -591,11 +621,13 @@ def validation_ddp(
     # We must remove these duplicate "dummy" samples before calculating our final metrics.
     world_size = get_world_size()
     dataset_len = len(val_loader.dataset)
-    padding_size = (
-        0
-        if (dataset_len % world_size) == 0
-        else world_size - (dataset_len % world_size)
-    )
+    padding_size = 0
+    if not max_validation_batches:
+        padding_size = (
+            0
+            if (dataset_len % world_size) == 0
+            else world_size - (dataset_len % world_size)
+        )
 
     for _ in range(padding_size):
         if len(dice_list) > 0:

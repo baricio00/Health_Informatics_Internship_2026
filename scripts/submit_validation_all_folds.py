@@ -60,7 +60,7 @@ validation_job = command(
     description="Validates all 5 folds sequentially.",
     experiment_name="myocardium_val_full_cv",
     compute="vmprdwe1-gpu-vzhst6",
-    environment="azureml:media-env:7",
+    environment="azureml:media-env:8",
     
     # Path to root of project
     code=".", 
