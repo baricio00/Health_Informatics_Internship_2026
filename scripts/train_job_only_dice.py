@@ -128,7 +128,11 @@ def select_device(requested_device, distributed):
                 f"({details})."
             )
         if device.type == "cuda":
-            torch.cuda.set_device(device)
+            device_index = device.index
+            if device_index is None:
+                device_index = int(os.environ.get("LOCAL_RANK", 0))
+            torch.cuda.set_device(device_index)
+            return torch.device(f"cuda:{device_index}")
         return device
 
     if torch.cuda.is_available():

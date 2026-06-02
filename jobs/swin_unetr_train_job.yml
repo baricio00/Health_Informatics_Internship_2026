@@ -1,0 +1,43 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: Myocardium Swin UNETR Training
+description: >
+  Trains a MONAI Swin UNETR on the LEMS-CT-NIfTI dataset using the
+  self-supervised MONAI encoder weights from weights/model_swinvit.pt.
+experiment_name: myocardium_segmentation_job
+compute: azureml:clusterprdwe-g-t2-vzhst6
+
+environment: azureml:media-env:8
+
+environment_variables:
+  PYTHONPATH: .
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+inputs:
+  input_data:
+    type: uri_folder
+    path: azureml:LEMS-CT-NIfTI:1
+    mode: ro_mount
+  fold: 0
+
+outputs:
+  output_model:
+    type: uri_folder
+
+code: ../
+command: >
+  python scripts/swin_UNETR.py
+  --input_data ${{inputs.input_data}}
+  --output_model ${{outputs.output_model}}
+  --split_csv data/cv_splits.csv
+  --fold ${{inputs.fold}}
+  --config config/train_config.yaml
+  --device cuda
+  --pretrained_swin_encoder weights/model_swinvit.pt
+  training.train_batch_size=1
+  training.accumulation_steps=4
+  inference.sw_batch_size=1
+
+resources:
+  instance_count: 1
+  shm_size: 8g

@@ -81,6 +81,16 @@ def yaml_scalar(value):
     return json.dumps(str(value))
 
 
+def is_remote_uri(value):
+    return bool(re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", str(value)))
+
+
+def resolve_path_argument(value):
+    if value is None or is_remote_uri(value):
+        return value
+    return str(resolve_local_path(value))
+
+
 def azure_compute_name(compute_ref):
     compute_ref = str(compute_ref).strip()
     if compute_ref.startswith("azureml:"):
@@ -166,6 +176,16 @@ def azure_display_name(job):
     )
 
 
+def azure_train_script_path(train_script):
+    path = Path(train_script)
+    if path.is_absolute():
+        try:
+            return str(path.resolve().relative_to(PROJECT_ROOT))
+        except ValueError:
+            return str(path)
+    return str(path)
+
+
 def build_jobs(args, sweep_dir):
     lrs = parse_float_values(args.lrs)
     weight_decays = parse_float_values(args.weight_decays)
@@ -228,7 +248,7 @@ def build_jobs(args, sweep_dir):
             args.python_executable,
             str(resolve_local_path(args.train_script)),
             "--input_data",
-            str(resolve_local_path(args.input_data)),
+            str(resolve_path_argument(args.input_data)),
             "--output_model",
             str(run_root),
             "--split_csv",
@@ -240,23 +260,30 @@ def build_jobs(args, sweep_dir):
             "--device",
             args.device,
         ]
+        if args.checkpoint:
+            command.extend(["--checkpoint", str(resolve_path_argument(args.checkpoint))])
         if not args.stop_on_trial_error:
             command.append("--continue_on_error")
         command.extend(training_overrides)
 
+        azure_checkpoint = (
+            "--checkpoint ${{inputs.checkpoint_file}} " if args.checkpoint else ""
+        )
         azure_overrides = " ".join(shlex.quote(override) for override in training_overrides)
         if azure_overrides:
             azure_overrides = f" {azure_overrides}"
         azure_continue = "" if args.stop_on_trial_error else "--continue_on_error "
+        azure_train_script = shlex.quote(azure_train_script_path(args.train_script))
         azure_command = (
             f"PYTORCH_CUDA_ALLOC_CONF={shlex.quote(OOM_SAFE_CUDA_ALLOC_CONF)} "
-            "python scripts/train_job_only_dice.py "
+            f"python {azure_train_script} "
             "--input_data ${{inputs.input_data}} "
             "--output_model ${{outputs.output_model}} "
             f"--split_csv {shlex.quote(args.split_csv)} "
             f"--fold {args.fold} "
             f"--config {shlex.quote(args.config)} "
             f"--device {shlex.quote(args.device)} "
+            f"{azure_checkpoint}"
             f"{azure_continue}"
             f"{azure_overrides}"
         )
@@ -270,6 +297,7 @@ def build_jobs(args, sweep_dir):
                 "roi_size": f"{roi_size}x{roi_size}x{roi_size}",
                 "target_spacing": format_vector(spacing),
                 "max_iterations": max_iterations,
+                "checkpoint": args.checkpoint or "",
                 "resource_overrides": " ".join(resource_overrides),
                 "continue_on_error": not args.stop_on_trial_error,
                 "run_root": str(run_root),
@@ -300,6 +328,7 @@ def manifest_rows(jobs):
                 "roi_size": job["roi_size"],
                 "target_spacing": job["target_spacing"],
                 "max_iterations": job["max_iterations"],
+                "checkpoint": job["checkpoint"],
                 "resource_overrides": job["resource_overrides"],
                 "continue_on_error": job["continue_on_error"],
                 "run_root": job["run_root"],
@@ -327,6 +356,7 @@ distribution:
   type: pytorch
   process_count_per_instance: {args.azure_process_count_per_instance}
 """
+    checkpoint_input_block = azure_checkpoint_input_yaml(job)
 
     return f"""$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
@@ -353,6 +383,7 @@ inputs:
     type: uri_folder
     path: {args.azure_input_data}
     mode: ro_mount
+{checkpoint_input_block}
 
 outputs:
   output_model:
@@ -366,6 +397,16 @@ command: >-
 resources:
   instance_count: {args.azure_instance_count}
 {distribution_block}
+"""
+
+
+def azure_checkpoint_input_yaml(job):
+    if not job.get("checkpoint"):
+        return ""
+    return f"""  checkpoint_file:
+    type: uri_file
+    path: {job["checkpoint"]}
+    mode: download
 """
 
 
@@ -598,6 +639,8 @@ def make_pipeline_command_component(job, args, has_previous):
     )
     command_text = f"{job['azure_command']} && {write_marker_command}"
     inputs = {"input_data": Input(type="uri_folder")}
+    if job.get("checkpoint"):
+        inputs["checkpoint_file"] = Input(type="uri_file")
     if has_previous:
         inputs["previous_marker"] = Input(type="uri_folder")
         command_text = f"test -f ${{{{inputs.previous_marker}}}}/done.txt && {command_text}"
@@ -647,13 +690,18 @@ def build_sequential_azure_pipeline(jobs, args):
                 args,
                 has_previous=previous_marker is not None,
             )
-            if previous_marker is None:
-                node = train_component(input_data=input_data)
-            else:
-                node = train_component(
-                    input_data=input_data,
-                    previous_marker=previous_marker,
+            node_inputs = {"input_data": input_data}
+            if job.get("checkpoint"):
+                node_inputs["checkpoint_file"] = Input(
+                    type="uri_file",
+                    path=job["checkpoint"],
+                    mode="download",
                 )
+            if previous_marker is None:
+                node = train_component(**node_inputs)
+            else:
+                node_inputs["previous_marker"] = previous_marker
+                node = train_component(**node_inputs)
 
             node.name = f"train_{idx:04d}"
             node.display_name = azure_display_name(job)
@@ -665,6 +713,7 @@ def build_sequential_azure_pipeline(jobs, args):
                 "weight_decay": str(job["weight_decay"]),
                 "roi_size": str(job["roi_size"]),
                 "target_spacing": str(job["target_spacing"]),
+                "checkpoint": str(job.get("checkpoint", "")),
             }
             previous_marker = node.outputs.completion_marker
             last_marker = previous_marker
@@ -925,13 +974,22 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Launch a single-fold hyperparameter sweep using train_job_only_dice.py."
     )
-    parser.add_argument("--input_data", type=str, required=True)
+    parser.add_argument("--input_data", type=str, default=None)
     parser.add_argument("--output_model", type=str, default="./sweep_outputs")
     parser.add_argument("--split_csv", type=str, default="data/cv_splits.csv")
     parser.add_argument("--fold", type=int, required=True)
     parser.add_argument("--config", type=str, default="config/train_config.yaml")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--train_script", type=str, default="scripts/train_job_only_dice.py")
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Optional checkpoint for fine-tuning. For Azure pipelines this is "
+            "passed as a uri_file input with mode=download."
+        ),
+    )
     parser.add_argument("--python_executable", type=str, default=sys.executable)
     parser.add_argument("--sweep_name", type=str, default=None)
     parser.add_argument(
@@ -1038,6 +1096,11 @@ def parse_args():
 
     args, extra_overrides = parser.parse_known_args()
     args.extra_overrides = extra_overrides
+
+    if args.input_data is None:
+        if args.backend == "local":
+            parser.error("--input_data is required when --backend local")
+        args.input_data = args.azure_input_data
 
     if args.max_parallel < 1:
         parser.error("--max_parallel must be >= 1")

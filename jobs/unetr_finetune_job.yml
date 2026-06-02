@@ -1,0 +1,48 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: Myocardium UNETR Fine-tuning
+description: >
+  Fine-tunes MONAI UNETR on the LEMS-CT-NIfTI dataset from an existing
+  project checkpoint. The checkpoint initializes model weights only; optimizer,
+  scaler, scheduler, and global step start fresh.
+experiment_name: myocardium_segmentation_job
+compute: azureml:clusterprdwe-vzhst6
+
+environment: azureml:media-env:8
+
+environment_variables:
+  PYTHONPATH: .
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+inputs:
+  input_data:
+    type: uri_folder
+    path: azureml:LEMS-CT-NIfTI:1
+    mode: ro_mount
+  checkpoint_file:
+    type: uri_file
+    path: azureml://datastores/workspaceblobstore/paths/azureml/maroon_kumquat_b1kpsvc4gd/output_model/fold_0/best_metric_model.pth
+    mode: download
+  fold: 0
+
+outputs:
+  output_model:
+    type: uri_folder
+
+code: ../
+command: >
+  python scripts/UNETR.py
+  --input_data ${{inputs.input_data}}
+  --output_model ${{outputs.output_model}}
+  --split_csv data/cv_splits.csv
+  --fold ${{inputs.fold}}
+  --config config/train_config.yaml
+  --device cuda
+  --checkpoint ${{inputs.checkpoint_file}}
+  training.train_batch_size=1
+  training.accumulation_steps=4
+  inference.sw_batch_size=1
+
+resources:
+  instance_count: 1
+  shm_size: 8g

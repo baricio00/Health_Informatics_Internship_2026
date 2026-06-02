@@ -103,6 +103,51 @@ python scripts/train_job.py \
 bash scripts/submit_train_folds.sh
 ```
 
+### Submit Swin UNETR fine-tuning pipeline
+
+Use this when you want one Azure ML parent pipeline containing all five Swin
+UNETR fine-tuning fold jobs.
+
+```bash
+python scripts/submit_swin_unetr_finetune_pipeline.py \
+  --checkpoint_path "azureml://datastores/workspaceblobstore/paths/azureml/completed_multifold_training_job/output_model/fold_{fold}/best_metric_model.pth"
+```
+
+If each fold checkpoint came from a separate training job, pass the job names in
+fold order instead:
+
+```bash
+python scripts/submit_swin_unetr_finetune_pipeline.py \
+  --checkpoint_job_names job_for_fold0 job_for_fold1 job_for_fold2 job_for_fold3 job_for_fold4
+```
+
+### Submit Swin UNETR fold-0 hyperparameter pipeline
+
+Use this to create a fresh Azure ML parent pipeline that searches Swin UNETR
+fine-tuning parameters on fold 0 only.
+
+```bash
+python scripts/hyperparameter_sweep_single_fold.py \
+  --backend azure \
+  --azure_submitter pipeline \
+  --fold 0 \
+  --device cuda \
+  --train_script scripts/swin_UNETR.py \
+  --checkpoint "azureml://datastores/workspaceblobstore/paths/azureml/cyan_planet_yhcvz8pgc1/output_model/fold_0/best_metric_model.pth" \
+  --azure_compute azureml:clusterprdwe-g-t2-vzhst6 \
+  --azure_auth_mode default \
+  --azure_experiment_name myocardium_swin_unetr_hparam_fold0 \
+  --sweep_name swin_unetr_fold0_hparam \
+  --max_iterations 6000 \
+  --lrs 3e-5 1e-4 3e-4 \
+  --weight_decays 1e-5 1e-4 1e-3 \
+  --losses dice dice_focal tversky \
+  --roi_sizes 96 \
+  --target_spacings 1.0 \
+  --pretrained_swin_encoder weights/model_swinvit.pt \
+  --no-large_roi_disable_ema
+```
+
 ## Evaluation Metrics
 
 | Metric | Description |
