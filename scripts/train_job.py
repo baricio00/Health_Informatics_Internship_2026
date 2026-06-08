@@ -85,7 +85,7 @@ def _calculate_case_metrics(label_pred, labels, spacing, cfg):
     tmp_ASD_list = np.clip(np.nan_to_num(tmp_ASD_list, nan=500), 0, 500)
     tmp_HD_list = np.clip(np.nan_to_num(tmp_HD_list, nan=500), 0, 500)
     tmp_dice_list, _, _ = calculate_dice_split(
-        label_pred.view(-1, 1), labels.view(-1, 1), cfg.model.out_channels
+        label_pred.reshape(-1, 1), labels.reshape(-1, 1), cfg.model.out_channels
     )
     return tmp_dice_list.unsqueeze(0), np.expand_dims(tmp_ASD_list, axis=0), np.expand_dims(tmp_HD_list, axis=0)
 

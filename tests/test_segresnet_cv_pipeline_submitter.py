@@ -37,6 +37,10 @@ class SegResNetCVPipelineSubmitterTests(unittest.TestCase):
         self.assertIn("--w0 ${{inputs.w0}}", command)
         self.assertIn("--w4 ${{inputs.w4}}", command)
 
+    def test_rejects_inference_incompatible_fold_order(self):
+        with self.assertRaises(SystemExit):
+            pipeline.parse_args(["--dry_run", "--folds", "1", "2", "3", "4", "0"])
+
     def test_prepares_minimal_code_bundle_without_heavy_local_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = pipeline.parse_args(["--dry_run", "--output_dir", tmp])
@@ -53,6 +57,29 @@ class SegResNetCVPipelineSubmitterTests(unittest.TestCase):
             self.assertFalse((code_dir / "weights").exists())
             self.assertFalse((code_dir / "outputs").exists())
             self.assertFalse((code_dir / "mlruns").exists())
+
+    def test_dry_run_pipeline_orders_folds_and_keeps_inference_outputs_wired(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = pipeline.parse_args(["--dry_run", "--output_dir", tmp])
+
+            pipeline_yaml = pipeline.submit_pipeline(args)
+            job_text = Path(pipeline_yaml).read_text()
+
+            for fold in range(1, 5):
+                self.assertIn(
+                    f"${{{{parent.jobs.segresnet_train_fold_{fold - 1}.outputs.completion_marker}}}}",
+                    job_text,
+                )
+
+            self.assertIn(
+                "${{parent.jobs.segresnet_train_fold_4.outputs.completion_marker}}",
+                job_text,
+            )
+            for fold in range(5):
+                self.assertIn(
+                    f"${{{{parent.jobs.segresnet_train_fold_{fold}.outputs.output_model}}}}",
+                    job_text,
+                )
 
 
 if __name__ == "__main__":

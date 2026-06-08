@@ -116,23 +116,37 @@ def build_training_specs(args):
     ]
 
 
-def make_training_component(spec, args):
+def make_training_component(spec, args, has_previous):
     from azure.ai.ml import Input, Output, command
+
+    command_text = spec.command
+    inputs = {"input_data": Input(type="uri_folder")}
+    if has_previous:
+        inputs["previous_marker"] = Input(type="uri_folder")
+        command_text = "test -f ${{inputs.previous_marker}}/done.txt && " + command_text
+    command_text = (
+        command_text
+        + " && mkdir -p ${{outputs.completion_marker}}"
+        + " && printf done > ${{outputs.completion_marker}}/done.txt"
+    )
 
     return command(
         name=spec.name,
         display_name=spec.display_name,
         description=f"SegResNet training for QC CV fold {spec.fold}",
         code=str(args.code_dir),
-        command=spec.command,
+        command=command_text,
         environment=args.azure_environment,
         environment_variables={
             "PYTHONPATH": ".",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         },
         compute=azure_compute_name(args.azure_compute),
-        inputs={"input_data": Input(type="uri_folder")},
-        outputs={"output_model": Output(type="uri_folder")},
+        inputs=inputs,
+        outputs={
+            "output_model": Output(type="uri_folder"),
+            "completion_marker": Output(type="uri_folder"),
+        },
         distribution={
             "type": "pytorch",
             "process_count_per_instance": args.process_count_per_instance,
@@ -146,9 +160,15 @@ def make_training_component(spec, args):
 def make_inference_component(args):
     from azure.ai.ml import Input, Output, command
 
-    inputs = {"input_data": Input(type="uri_folder")}
+    inputs = {
+        "input_data": Input(type="uri_folder"),
+        "final_marker": Input(type="uri_folder"),
+    }
     inputs.update(
         {f"w{index}": Input(type="uri_folder") for index, _ in enumerate(args.folds)}
+    )
+    command_text = (
+        "test -f ${{inputs.final_marker}}/done.txt && " + inference_command(args)
     )
 
     return command(
@@ -156,7 +176,7 @@ def make_inference_component(args):
         display_name="Myocardium SegResNet CV Ensemble Inference",
         description="Ensemble held-out QC test inference from the five CV fold outputs.",
         code=str(args.code_dir),
-        command=inference_command(args),
+        command=command_text,
         environment=args.azure_environment,
         environment_variables={"PYTHONPATH": "."},
         compute=azure_compute_name(args.azure_compute),
@@ -186,9 +206,18 @@ def build_azure_pipeline(args):
     )
     def segresnet_cv_pipeline(input_data):
         fold_nodes = []
+        previous_marker = None
         for spec in specs:
-            component = make_training_component(spec, args)
-            node = component(input_data=input_data)
+            component = make_training_component(
+                spec,
+                args,
+                has_previous=previous_marker is not None,
+            )
+            node_inputs = {"input_data": input_data}
+            if previous_marker is not None:
+                node_inputs["previous_marker"] = previous_marker
+
+            node = component(**node_inputs)
             node.name = spec.name
             node.display_name = spec.display_name
             node.tags = {
@@ -198,9 +227,13 @@ def build_azure_pipeline(args):
                 "stage": "training",
             }
             fold_nodes.append(node)
+            previous_marker = node.outputs.completion_marker
 
         inference_component = make_inference_component(args)
-        inference_inputs = {"input_data": input_data}
+        inference_inputs = {
+            "input_data": input_data,
+            "final_marker": previous_marker,
+        }
         inference_inputs.update(
             {
                 f"w{index}": node.outputs.output_model
@@ -319,6 +352,10 @@ def parse_args(argv=None):
         parser.error("--test_fold must not be one of the training CV folds")
     if len(args.folds) != 5:
         parser.error("The current ensemble inference job expects exactly five folds")
+    if args.folds != DEFAULT_FOLDS:
+        parser.error(
+            "The full CV ensemble pipeline requires folds in order: 0 1 2 3 4"
+        )
 
     return args
 

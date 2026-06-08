@@ -1,9 +1,9 @@
 import torch
-from . import metrics
 import numpy as np
 
 
 def calculate_distance(label_pred, label_true, spacing, C, percentage=95):
+    from . import metrics
 
     label_pred = label_pred.cpu().numpy()
     label_true = label_true.cpu().numpy()
@@ -28,8 +28,8 @@ def calculate_distance(label_pred, label_true, spacing, C, percentage=95):
 
 def calculate_dice_split(pred, target, C, block_size=64*64*64):
     
-    pred = pred.view(C, -1).t()
-    target = target.view(C, -1).t()
+    pred = pred.reshape(C, -1).t()
+    target = target.reshape(C, -1).t()
     
     assert pred.shape[0] == target.shape[0]
     N = pred.shape[0]
@@ -38,11 +38,16 @@ def calculate_dice_split(pred, target, C, block_size=64*64*64):
     
     split_num = N // block_size
     for i in range(split_num):
-        dice, intersection, summ = calculate_dice(pred[i*block_size:(i+1)*block_size, :], target[i*block_size:(i+1)*block_size, :], C)
+        dice, intersection, summ = calculate_dice(
+            pred[i * block_size : (i + 1) * block_size, :],
+            target[i * block_size : (i + 1) * block_size, :],
+            C,
+        )
         total_intersection += intersection
         total_sum += summ
     if N % block_size != 0:
-        dice, intersection, summ = calculate_dice(pred[(i+1)*block_size:, :], target[(i+1)*block_size:, :], C)
+        start = split_num * block_size
+        dice, intersection, summ = calculate_dice(pred[start:, :], target[start:, :], C)
         total_intersection += intersection
         total_sum += summ
 
