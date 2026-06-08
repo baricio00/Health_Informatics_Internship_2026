@@ -12,6 +12,7 @@ data/skipped_invalid_files_fold_*.csv
 mlruns/
 /.claude/
 LEGGIMI.md
+README_INSTALL.md
 *.sif
 *.nii.gz
 *.pth

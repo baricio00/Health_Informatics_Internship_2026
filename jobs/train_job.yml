@@ -1,9 +1,10 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
-display_name: Myocardium UNETR Training
+display_name: Myocardium SegResNet Training
 description: >
-  Trains a MONAI UNETR on the LEMS-CT-NIfTI dataset.
-  Includes Automatic Mixed Precision (AMP) and PersistentDataset caching.
+  Trains a MONAI SegResNet on the LEMS-CT-NIfTI dataset.
+  Validation records raw and LCC-postprocessed metrics; checkpoint selection
+  uses the deployed LCC-postprocessed Dice score.
 experiment_name: myocardium_segmentation_job
 compute: azureml:clusterprdwe-vzhst6
 
@@ -19,27 +20,11 @@ inputs:
     mode: ro_mount
   fold: 0
 
-  # -----------------------------------------------------------------
-  # TO FINETUNE OR RESUME: Uncomment the block below and replace 
-  # the 'path' with the actual datastore URI to your .pth file.
-  # -----------------------------------------------------------------
+  # To fine-tune or resume, uncomment this block and replace the path.
   # checkpoint_file:
   #   type: uri_file
   #   path: azureml://datastores/73da10b45dff54e2db0d3a1fab882485/paths/output/models/latest_checkpoint.pth
   #   mode: ro_mount
-
-  
-  # -----------------------------------------------------------------
-  # TO FINETUNE: Uncomment the line below to load the model weights. 
-  # Add this additional input argument to the command: > below
-  # -----------------------------------------------------------------
-  # --checkpoint ${{inputs.checkpoint_file}}
-  
-  # -----------------------------------------------------------------
-  # TO RESUME: Uncomment BOTH the checkpoint line above AND the line below
-  # Add these additional input arguments (both --checkpoint and --resume) to the command: > below
-  # -----------------------------------------------------------------
-  # --resume
 
 outputs:
   output_model:
@@ -47,7 +32,7 @@ outputs:
 
 code: ../
 command: >
-  python scripts/UNETR.py
+  python scripts/train_job.py
   --input_data ${{inputs.input_data}}
   --output_model ${{outputs.output_model}}
   --split_csv data/cv_splits.csv
@@ -55,4 +40,4 @@ command: >
   --config config/train_config.yaml
 
 resources:
-    instance_count: 1
+  instance_count: 1

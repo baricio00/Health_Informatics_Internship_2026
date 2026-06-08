@@ -1,11 +1,12 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
 
-display_name: Myocardium Ensemble Inference
+display_name: Myocardium Ensemble Inference with LCC
 experiment_name: myocardium_segmentation_inference
 description: >
-  Runs MONAI sliding-window ensemble inference over the five fold checkpoints
-  and writes the predicted mask as a NIfTI file.
+  Runs MONAI sliding-window ensemble inference over the five fold checkpoints,
+  writes predicted masks as NIfTI files, and applies final largest-connected-
+  component post-processing to exported binary masks.
 
 compute: azureml:clusterprdwe-gpu-vzhst6
 environment: azureml:media-env:8
