@@ -4,9 +4,10 @@ type: command
 display_name: Myocardium Ensemble Inference with LCC
 experiment_name: myocardium_segmentation_inference
 description: >
-  Runs MONAI sliding-window ensemble inference over the five fold checkpoints,
+  Runs MONAI sliding-window ensemble inference over the five CV fold checkpoints,
   writes predicted masks as NIfTI files, and applies final largest-connected-
-  component post-processing to exported binary masks.
+  component post-processing to exported binary masks. By default the job uses
+  fold -1 from data/cv_splits_qc.csv as the held-out test set.
 
 compute: azureml:clusterprdwe-gpu-vzhst6
 environment: azureml:media-env:8
@@ -21,11 +22,28 @@ inputs:
     type: uri_folder
     path: azureml:LEMS-CT-NIfTI:1
     mode: ro_mount
-  checkpoints_root:
+  # Set these to the output_model folders of the five completed fold jobs.
+  # Example override:
+  # --set inputs.w0.path=azureml://datastores/workspaceblobstore/paths/azureml/<fold0_job>/output_model/
+  w0:
     type: uri_folder
-    path: ../outputs-only-dice-1
+    mode: ro_mount
+  w1:
+    type: uri_folder
+    mode: ro_mount
+  w2:
+    type: uri_folder
+    mode: ro_mount
+  w3:
+    type: uri_folder
+    mode: ro_mount
+  w4:
+    type: uri_folder
     mode: ro_mount
   fold_count: 5
+  split_csv: data/cv_splits_qc.csv
+  test_fold: -1
+  config: config/train_config.yaml
   case_name: ""
   seed: 1303
   unseen_offset: 200
@@ -37,12 +55,20 @@ outputs:
 command: >
   python jobs/inference_job.py
   --input_data ${{inputs.input_data}}
-  --checkpoints_root ${{inputs.checkpoints_root}}
   --output_dir ${{outputs.output_dir}}
   --fold_count ${{inputs.fold_count}}
+  --split_csv ${{inputs.split_csv}}
+  --test_fold ${{inputs.test_fold}}
+  --config ${{inputs.config}}
+  --w0 ${{inputs.w0}}
+  --w1 ${{inputs.w1}}
+  --w2 ${{inputs.w2}}
+  --w3 ${{inputs.w3}}
+  --w4 ${{inputs.w4}}
   --case_name ${{inputs.case_name}}
   --seed ${{inputs.seed}}
   --unseen_offset ${{inputs.unseen_offset}}
 
 resources:
   instance_count: 1
+  shm_size: 8g

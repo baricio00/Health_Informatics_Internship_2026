@@ -24,12 +24,13 @@ from monai.losses import DiceFocalLoss
 # from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.inferers import sliding_window_inference
 from monai.data import PersistentDataset, DataLoader, decollate_batch
-from monai.transforms import AsDiscrete, Compose, KeepLargestConnectedComponent
+from monai.transforms import AsDiscrete
 
 from lems_ct.src.models.model import get_segresnet
 from lems_ct.src.utils.transforms import get_transforms
 from lems_ct.src.utils.data import get_files_from_csv
 from lems_ct.src.metrics.utils import calculate_dice_split, calculate_distance
+from scripts.lcc_postprocessing import lcc_one_hot_after_argmax
 
 
 # ==========================================
@@ -170,7 +171,13 @@ def validation_ddp(
             val_labels_convert = [post_label(x) for x in decollate_batch(val_labels)]
             val_outputs_list = decollate_batch(val_outputs)
             val_output_raw = [post_pred_raw(x) for x in val_outputs_list]
-            val_output_lcc = [post_pred_lcc(x) for x in val_outputs_list]
+            val_output_lcc = [
+                lcc_one_hot_after_argmax(
+                    x.unsqueeze(0),
+                    cfg.model.out_channels,
+                )[0]
+                for x in val_outputs_list
+            ]
 
             labels = val_labels_convert[0].cpu().bool()
             label_pred_raw = val_output_raw[0].cpu()
@@ -479,16 +486,7 @@ def main(args, cfg):
 
     post_label = AsDiscrete(to_onehot=cfg.model.out_channels)
     post_pred_raw = AsDiscrete(argmax=True, to_onehot=cfg.model.out_channels)
-    post_pred_lcc = Compose([
-        AsDiscrete(argmax=True, to_onehot=cfg.model.out_channels),
-        KeepLargestConnectedComponent(
-            applied_labels=[1],
-            is_onehot=True,
-            independent=True,
-            connectivity=1,
-            num_components=1,
-        ),
-    ])
+    post_pred_lcc = None
 
     scaler = torch.amp.GradScaler("cuda")
 
@@ -556,7 +554,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_data", type=str, required=True)
     parser.add_argument("--output_model", type=str, required=True)
-    parser.add_argument("--split_csv", type=str, default="cv_splits.csv")
+    parser.add_argument("--split_csv", type=str, default="data/cv_splits_qc.csv")
     parser.add_argument("--fold", type=int, required=True)
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--resume", action="store_true")

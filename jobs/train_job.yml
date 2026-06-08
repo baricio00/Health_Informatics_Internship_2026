@@ -2,16 +2,18 @@ $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
 display_name: Myocardium SegResNet Training
 description: >
-  Trains a MONAI SegResNet on the LEMS-CT-NIfTI dataset.
+  Trains one MONAI SegResNet fold on the QC-filtered LEMS-CT-NIfTI split.
+  Fold -1 rows in data/cv_splits_qc.csv are reserved for held-out testing.
   Validation records raw and LCC-postprocessed metrics; checkpoint selection
   uses the deployed LCC-postprocessed Dice score.
 experiment_name: myocardium_segmentation_job
-compute: azureml:clusterprdwe-vzhst6
+compute: azureml:clusterprdwe-g-t2-vzhst6
 
 environment: azureml:media-env:8
 
 environment_variables:
   PYTHONPATH: .
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
 
 inputs:
   input_data:
@@ -35,9 +37,14 @@ command: >
   python scripts/train_job.py
   --input_data ${{inputs.input_data}}
   --output_model ${{outputs.output_model}}
-  --split_csv data/cv_splits.csv
+  --split_csv data/cv_splits_qc.csv
   --fold ${{inputs.fold}}
   --config config/train_config.yaml
 
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+
 resources:
   instance_count: 1
+  shm_size: 8g

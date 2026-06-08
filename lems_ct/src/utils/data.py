@@ -94,7 +94,10 @@ def get_files_from_csv(input_dir, csv_path, fold_idx):
 
         data_dict = {"image": str(img_path), "label": str(lbl_path)}
 
-        # Route to Train or Val based on the fold argument
+        # Negative fold labels are reserved hold-out/test cases and must not
+        # leak into cross-validation training or validation splits.
+        if current_fold < 0:
+            continue
         if current_fold == fold_idx:
             val_files.append(data_dict)
         else:

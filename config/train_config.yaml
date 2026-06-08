@@ -24,7 +24,7 @@ training:
   lr: 0.0003
   # weight_decay: 0.01
   weight_decay: 0.00001
-  max_iterations: 6000
+  max_iterations: 16000
   eval_num: 500
   accumulation_steps: 2
   use_ema: true

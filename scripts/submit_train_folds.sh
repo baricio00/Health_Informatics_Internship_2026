@@ -11,7 +11,9 @@ do
   
   az ml job create --file "$JOB_FILE" \
     --set display_name="Myocardium SegResNet Training - fold $i" \
-    --set inputs.fold=$i
+    --set inputs.fold=$i \
+    --output json \
+    --only-show-errors
     
   echo "Fold $i submitted successfully!"
   echo "--------------------------------"
